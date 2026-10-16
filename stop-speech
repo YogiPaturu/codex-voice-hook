@@ -1,3 +1,4 @@
 #!/bin/sh
-# Stop speech started by speak-notify.py.
-/usr/bin/pkill -x say 2>/dev/null || true
+# Stop current speech and clear summaries waiting in the queue.
+SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+/usr/bin/python3 "$SCRIPT_DIR/speak-notify.py" --stop

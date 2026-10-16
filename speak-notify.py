@@ -3,15 +3,21 @@
 
 import json
 import fcntl
+import os
+from pathlib import Path
 import re
+import sqlite3
 import subprocess
 import sys
+import time
 
 SAFE_SPOKEN_TEXT = re.compile(r"[\w\s.,!?;’'()\-]+", re.UNICODE)
 CODE_FILE = re.compile(
     r"\b[\w-]+\.(?:py|js|ts|tsx|jsx|sh|toml|json|log|md|txt|yaml|yml|rs|go|java|c|h)\b",
     re.IGNORECASE,
 )
+QUEUE_DB = "/tmp/codex-voice-hook-queue.sqlite3"
+WORKER_LOCK = "/tmp/codex-voice-hook-worker.lock"
 
 
 def extract_voice_marker(response):
@@ -45,7 +51,61 @@ def extract_voice_marker(response):
     return None
 
 
+def enqueue(project, spoken):
+    with sqlite3.connect(QUEUE_DB, timeout=10) as db:
+        db.execute("CREATE TABLE IF NOT EXISTS speech (id INTEGER PRIMARY KEY, text TEXT NOT NULL)")
+        db.execute("INSERT INTO speech (text) VALUES (?)", (f"{project}. {spoken}",))
+    subprocess.Popen(
+        [sys.executable, str(Path(__file__).resolve()), "--worker"],
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        start_new_session=True,
+    )
+
+
+def run_worker():
+    with open(WORKER_LOCK, "w") as lock:
+        # Each enqueue launches a worker; waiting workers prevent lost wakeups.
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        while True:
+            with sqlite3.connect(QUEUE_DB, timeout=10) as db:
+                db.execute("CREATE TABLE IF NOT EXISTS speech (id INTEGER PRIMARY KEY, text TEXT NOT NULL)")
+                row = db.execute("SELECT id, text FROM speech ORDER BY id LIMIT 1").fetchone()
+            if row is None:
+                return 0
+            subprocess.run(
+                ["/usr/bin/say", "-r", "210", row[1]],
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                check=False,
+            )
+            with sqlite3.connect(QUEUE_DB, timeout=10) as db:
+                db.execute("DELETE FROM speech WHERE id = ?", (row[0],))
+            time.sleep(0.1)
+
+
+def stop_speech():
+    with sqlite3.connect(QUEUE_DB, timeout=10) as db:
+        db.execute("CREATE TABLE IF NOT EXISTS speech (id INTEGER PRIMARY KEY, text TEXT NOT NULL)")
+        db.execute("DELETE FROM speech")
+    subprocess.run(
+        ["/usr/bin/pkill", "-x", "say"],
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        check=False,
+    )
+    return 0
+
+
 def main():
+    if sys.argv[1:] == ["--worker"]:
+        return run_worker()
+    if sys.argv[1:] == ["--stop"]:
+        return stop_speech()
+
     try:
         event = json.load(sys.stdin)
     except (json.JSONDecodeError, TypeError):
@@ -56,23 +116,9 @@ def main():
 
     spoken = extract_voice_marker(event.get("last_assistant_message"))
     if spoken:
-        # Serialize replacement so simultaneous terminal hooks cannot overlap.
-        with open("/tmp/codex-voice-hook.lock", "w") as lock:
-            fcntl.flock(lock, fcntl.LOCK_EX)
-            subprocess.run(
-                ["/usr/bin/pkill", "-x", "say"],
-                stdin=subprocess.DEVNULL,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                check=False,
-            )
-            subprocess.Popen(
-                ["/usr/bin/say", "-r", "210", spoken],
-                stdin=subprocess.DEVNULL,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                start_new_session=True,
-            )
+        cwd = event.get("cwd") or os.getcwd()
+        project = re.sub(r"[^\w -]", "", Path(cwd).name).replace("_", " ").strip()[:40]
+        enqueue(project or "Codex", spoken)
     return 0
 
 

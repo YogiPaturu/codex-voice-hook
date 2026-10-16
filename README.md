@@ -1,6 +1,6 @@
 # Codex Voice Hook
 
-A small macOS Codex CLI hook that speaks a short `VOICE:` summary at the end of a turn. It uses the built-in `/usr/bin/say` command and stays silent when the response has no valid marker.
+A small macOS Codex CLI hook that queues and speaks short `VOICE:` summaries at the end of turns. It uses the built-in `/usr/bin/say` command, announces the current project by folder name, and stays silent when the response has no valid marker.
 
 ## Requirements
 
@@ -37,11 +37,11 @@ Add a short instruction to `~/.codex/AGENTS.md`:
 For Codex CLI responses in macOS Terminal, include a final single-line `VOICE: ...` marker only when meaningful work is complete, a significant problem occurs, a decision is needed, or the user explicitly asks for speech. Keep it plain language; do not put code, file paths, or terminal logs in the marker. Omit the marker for all other responses.
 ```
 
-The hook speaks only a single-line marker outside fenced code blocks. It rejects code-like punctuation, underscores, and common source or config file names. Keep spoken summaries brief; the hook does not enforce a word limit.
+The hook speaks only a single-line marker outside fenced code blocks. It rejects code-like punctuation, underscores, and common source or config file names. Keep spoken summaries brief; the hook does not enforce a word limit. Summaries from multiple terminals are queued and played one at a time.
 
 ## Stop playback
 
-Run:
+Run to stop current playback and clear queued summaries:
 
 ```sh
 ~/.codex/hooks/stop-speech
