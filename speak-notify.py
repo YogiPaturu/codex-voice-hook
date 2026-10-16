@@ -2,6 +2,7 @@
 """Speak a short VOICE: line from a completed Codex response on macOS."""
 
 import json
+import fcntl
 import re
 import subprocess
 import sys
@@ -55,13 +56,23 @@ def main():
 
     spoken = extract_voice_marker(event.get("last_assistant_message"))
     if spoken:
-        subprocess.Popen(
-            ["/usr/bin/say", "-r", "210", spoken],
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            start_new_session=True,
-        )
+        # Serialize replacement so simultaneous terminal hooks cannot overlap.
+        with open("/tmp/codex-voice-hook.lock", "w") as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX)
+            subprocess.run(
+                ["/usr/bin/pkill", "-x", "say"],
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                check=False,
+            )
+            subprocess.Popen(
+                ["/usr/bin/say", "-r", "210", spoken],
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                start_new_session=True,
+            )
     return 0
 
 
