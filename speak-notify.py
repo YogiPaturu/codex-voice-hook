@@ -3,7 +3,6 @@
 
 import json
 import fcntl
-import os
 from pathlib import Path
 import re
 import sqlite3
@@ -51,10 +50,32 @@ def extract_voice_marker(response):
     return None
 
 
+def project_name(cwd):
+    path = Path(cwd).expanduser().resolve()
+    try:
+        root = subprocess.run(
+            ["/usr/bin/git", "-C", str(path), "rev-parse", "--show-toplevel"],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=1,
+        ).stdout.strip()
+        if root:
+            path = Path(root)
+    except (OSError, subprocess.SubprocessError):
+        markers = ("pyproject.toml", "package.json", "Cargo.toml", "go.mod", "Makefile", "justfile", "composer.json")
+        for parent in (path, *path.parents):
+            if (parent / ".git").exists() or any((parent / marker).is_file() for marker in markers):
+                path = parent
+                break
+    name = re.sub(r"[^\w -]", "", path.name).replace("_", " ").strip()[:40]
+    return name or "Codex"
+
+
 def enqueue(project, spoken):
     with sqlite3.connect(QUEUE_DB, timeout=10) as db:
         db.execute("CREATE TABLE IF NOT EXISTS speech (id INTEGER PRIMARY KEY, text TEXT NOT NULL)")
-        db.execute("INSERT INTO speech (text) VALUES (?)", (f"{project}. {spoken}",))
+        db.execute("INSERT INTO speech (text) VALUES (?)", (f"Project {project}. {spoken}",))
     subprocess.Popen(
         [sys.executable, str(Path(__file__).resolve()), "--worker"],
         stdin=subprocess.DEVNULL,
@@ -116,9 +137,8 @@ def main():
 
     spoken = extract_voice_marker(event.get("last_assistant_message"))
     if spoken:
-        cwd = event.get("cwd") or os.getcwd()
-        project = re.sub(r"[^\w -]", "", Path(cwd).name).replace("_", " ").strip()[:40]
-        enqueue(project or "Codex", spoken)
+        cwd = event.get("cwd") or event.get("current_working_directory") or os.getcwd()
+        enqueue(project_name(cwd), spoken)
     return 0
 
 

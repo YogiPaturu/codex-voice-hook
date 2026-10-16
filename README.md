@@ -1,6 +1,6 @@
 # Codex Voice Hook
 
-A small macOS Codex CLI hook that queues and speaks short `VOICE:` summaries at the end of turns. It uses the built-in `/usr/bin/say` command, announces the current project by folder name, and stays silent when the response has no valid marker.
+A small macOS Codex CLI hook that queues and speaks short `VOICE:` summaries at the end of turns. It uses the built-in `/usr/bin/say` command, announces the Git project root name (so subfolders share the same label), and stays silent when the response has no valid marker. Outside a Git repository, it looks for common project files and falls back to the current folder.
 
 ## Requirements
 
