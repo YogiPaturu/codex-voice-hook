@@ -3,6 +3,7 @@
 
 import json
 import fcntl
+import os
 from pathlib import Path
 import re
 import sqlite3
@@ -17,6 +18,11 @@ CODE_FILE = re.compile(
 )
 QUEUE_DB = "/tmp/codex-voice-hook-queue.sqlite3"
 WORKER_LOCK = "/tmp/codex-voice-hook-worker.lock"
+COMPUTER_USE = (
+    Path.home()
+    / ".codex/computer-use/Codex Computer Use.app/Contents/SharedSupport/"
+    "SkyComputerUseClient.app/Contents/MacOS/SkyComputerUseClient"
+)
 
 
 def extract_voice_marker(response):
@@ -127,17 +133,43 @@ def main():
     if sys.argv[1:] == ["--stop"]:
         return stop_speech()
 
+    is_cli_notification = len(sys.argv) > 1
+    if is_cli_notification:
+        payload = sys.argv[-1]
+    elif not sys.stdin.isatty():
+        payload = sys.stdin.read()
+    else:
+        payload = "{}"
     try:
-        event = json.load(sys.stdin)
+        event = json.loads(payload)
     except (json.JSONDecodeError, TypeError):
         return 0
 
-    if event.get("hook_event_name") != "Stop":
-        return 0
+    if is_cli_notification:
+        if COMPUTER_USE.is_file():
+            try:
+                subprocess.Popen(
+                    [str(COMPUTER_USE), "turn-ended", payload],
+                    stdin=subprocess.DEVNULL,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    start_new_session=True,
+                )
+            except OSError:
+                pass
+        if event.get("type") != "agent-turn-complete":
+            return 0
+        response = event.get("last-assistant-message")
+        cwd = event.get("cwd")
+    else:
+        if event.get("hook_event_name") != "Stop":
+            return 0
+        response = event.get("last_assistant_message")
+        cwd = event.get("cwd")
 
-    spoken = extract_voice_marker(event.get("last_assistant_message"))
+    spoken = extract_voice_marker(response)
     if spoken:
-        cwd = event.get("cwd") or event.get("current_working_directory") or os.getcwd()
+        cwd = cwd or event.get("current_working_directory") or os.getcwd()
         enqueue(project_name(cwd), spoken)
     return 0
 

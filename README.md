@@ -29,6 +29,10 @@ Replace `YOUR_NAME` with your macOS account's short name. Restart Codex after ch
 
 If you use another hook for `Stop`, add this command to that hook list instead of replacing it.
 
+### Link the installed hook to this checkout
+
+Run `./install.sh` from this repository. It links the speech and stop scripts into your Codex hooks directory and saves any files it replaces as timestamped backups. If your Codex config already points to `~/.codex/hooks/speak-notify.py`, no config change is needed. Changes pulled into this checkout take effect immediately through the links. Run `./update.sh` to pull the latest GitHub version and refresh the links. GitHub changes are not downloaded automatically.
+
 ## Ask Codex for spoken summaries
 
 Add a short instruction to `~/.codex/AGENTS.md`:
