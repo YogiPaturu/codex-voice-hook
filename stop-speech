@@ -1,0 +1,3 @@
+#!/bin/sh
+# Stop speech started by speak-notify.py.
+/usr/bin/pkill -x say 2>/dev/null || true
