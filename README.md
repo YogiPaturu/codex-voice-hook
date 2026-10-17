@@ -20,7 +20,7 @@ After the first install, update everything from this checkout with:
 ./update.sh
 ```
 
-This fast-forwards the repository and reruns the installer, so hook scripts, Codex hook registrations, and the spoken-response instruction all stay in sync. Restart Codex if it is already running.
+This fast-forwards the repository and reinstalls everything: both hook scripts, Codex hook registrations, and the spoken-response instruction. Codex runs the hook scripts when their events occur; you do not need to run them yourself. Restart Codex if it is already running.
 
 ## What it speaks
 
