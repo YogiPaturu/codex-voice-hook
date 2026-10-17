@@ -11,9 +11,20 @@ import subprocess
 import sys
 import time
 
-SAFE_SPOKEN_TEXT = re.compile(r"[\w\s.,!?;’'()\-]+", re.UNICODE)
+SAFE_SPOKEN_TEXT = re.compile(r"[\w\s.,!?;:’'()\-]+", re.UNICODE)
 CODE_FILE = re.compile(
     r"\b[\w-]+\.(?:py|js|ts|tsx|jsx|sh|toml|json|log|md|txt|yaml|yml|rs|go|java|c|h)\b",
+    re.IGNORECASE,
+)
+DECISION_QUESTION = re.compile(
+    r"\b(?:which|what|should i|would you like|do you want|shall i|"
+    r"want me to|would you prefer|do you prefer)\b",
+    re.IGNORECASE,
+)
+EXPLICIT_DECISION = re.compile(
+    r"\b(?:please\s+)?(?:choose|select|pick)\b|"
+    r"\b(?:need|awaiting|waiting for)\s+(?:your\s+)?(?:decision|choice|approval)\b|"
+    r"\bdecision needed\b",
     re.IGNORECASE,
 )
 QUEUE_DB = "/tmp/codex-voice-hook-queue.sqlite3"
@@ -41,7 +52,7 @@ def extract_voice_marker(response):
             continue
         if in_fence:
             continue
-        match = re.fullmatch(r"\s*VOICE:\s*(.*?)\s*", line, flags=re.IGNORECASE)
+        match = re.fullmatch(r"\s*(?:🗣️\s*)?VOICE:\s*(.*?)\s*", line, flags=re.IGNORECASE)
         if not match:
             continue
         text = match.group(1).strip()
@@ -54,6 +65,74 @@ def extract_voice_marker(response):
             return None
         return text
     return None
+
+
+def extract_decision_request(response):
+    """Speak a clear choice request when the response has no VOICE marker."""
+    if not isinstance(response, str):
+        return None
+
+    in_fence = False
+    paragraphs = []
+    current = []
+    for line in response.splitlines():
+        fence = re.match(r"\s*(```|~~~)", line)
+        if fence:
+            in_fence = not in_fence
+            continue
+        if in_fence:
+            continue
+        if not line.strip():
+            if current:
+                paragraphs.append(" ".join(current))
+                current = []
+            continue
+        if re.match(r"\s*(?:🗣️\s*)?VOICE:", line, flags=re.IGNORECASE):
+            continue
+        line = re.sub(r"^\s*(?:[-*+]\s+|\d+[.)]\s+|#+\s*)", "", line)
+        line = re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", line)
+        line = re.sub(r"https?://\S+", "", line)
+        line = re.sub(r"[`*_>#]", "", line).strip()
+        if line:
+            current.append(line)
+    if current:
+        paragraphs.append(" ".join(current))
+
+    for paragraph in reversed(paragraphs):
+        paragraph = re.sub(r"\s+", " ", paragraph).replace("—", ", ").replace("–", "-").strip()
+        is_question = "?" in paragraph and DECISION_QUESTION.search(paragraph)
+        is_explicit = EXPLICIT_DECISION.search(paragraph)
+        if not (is_question or is_explicit):
+            continue
+        if (
+            SAFE_SPOKEN_TEXT.fullmatch(paragraph)
+            and "_" not in paragraph
+            and not CODE_FILE.search(paragraph)
+        ):
+            return paragraph
+    return None
+
+
+def permission_request_message(event):
+    """Use a safe human-readable request description, or a short fallback."""
+    fallback = "Decision needed."
+    tool_input = event.get("tool_input")
+    description = tool_input.get("description") if isinstance(tool_input, dict) else None
+    if not isinstance(description, str):
+        return fallback
+
+    description = re.sub(r"\s+", " ", description).strip()
+    if (
+        not description
+        or len(description.split()) > 24
+        or not SAFE_SPOKEN_TEXT.fullmatch(description)
+        or "_" in description
+        or CODE_FILE.search(description)
+    ):
+        return fallback
+    if description[-1] not in ".!?":
+        description += "."
+    return f"Decision needed. {description}"
 
 
 def project_name(cwd):
@@ -162,12 +241,20 @@ def main():
         response = event.get("last-assistant-message")
         cwd = event.get("cwd")
     else:
-        if event.get("hook_event_name") != "Stop":
+        hook_event = event.get("hook_event_name")
+        if hook_event == "PermissionRequest":
+            # Permission prompts are separate from the completed assistant
+            # message, so announce the pending decision without trying to
+            # infer or speak the prompt text.
+            cwd = event.get("cwd") or event.get("current_working_directory") or os.getcwd()
+            enqueue(project_name(cwd), permission_request_message(event))
+            return 0
+        if hook_event != "Stop":
             return 0
         response = event.get("last_assistant_message")
         cwd = event.get("cwd")
 
-    spoken = extract_voice_marker(response)
+    spoken = extract_voice_marker(response) or extract_decision_request(response)
     if spoken:
         cwd = cwd or event.get("current_working_directory") or os.getcwd()
         enqueue(project_name(cwd), spoken)
