@@ -113,26 +113,9 @@ def extract_decision_request(response):
     return None
 
 
-def permission_request_message(event):
-    """Use a safe human-readable request description, or a short fallback."""
-    fallback = "Decision needed."
-    tool_input = event.get("tool_input")
-    description = tool_input.get("description") if isinstance(tool_input, dict) else None
-    if not isinstance(description, str):
-        return fallback
-
-    description = re.sub(r"\s+", " ", description).strip()
-    if (
-        not description
-        or len(description.split()) > 24
-        or not SAFE_SPOKEN_TEXT.fullmatch(description)
-        or "_" in description
-        or CODE_FILE.search(description)
-    ):
-        return fallback
-    if description[-1] not in ".!?":
-        description += "."
-    return f"Decision needed. {description}"
+def permission_request_message():
+    """Keep approval prompts short and avoid speaking tool details."""
+    return "Decision needed."
 
 
 def project_name(cwd):
@@ -247,7 +230,7 @@ def main():
             # message, so announce the pending decision without trying to
             # infer or speak the prompt text.
             cwd = event.get("cwd") or event.get("current_working_directory") or os.getcwd()
-            enqueue(project_name(cwd), permission_request_message(event))
+            enqueue(project_name(cwd), permission_request_message())
             return 0
         if hook_event != "Stop":
             return 0
